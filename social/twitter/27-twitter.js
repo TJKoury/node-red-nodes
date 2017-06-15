@@ -183,7 +183,9 @@ module.exports = function(RED) {
                     var thingu = 'user';
                     var setupEvStream = function() {
                         if (node.active) {
-                            twit.stream(thingu, st, function(stream) {
+                            clearTimeout(process.twitStream);
+                            process.twitStream = setTimeout(()=>{
+                                twit.stream(thingu, st, function(stream) {
                                 node.status({fill:"green", shape:"dot", text:" "});
                                 node.stream = stream;
                                 stream.on('data', function(tweet) {
@@ -226,6 +228,8 @@ module.exports = function(RED) {
                                     }
                                 });
                             });
+                            },5000);
+                            
                         }
                     }
                     setupEvStream();
@@ -243,52 +247,55 @@ module.exports = function(RED) {
                     var setupStream = function() {
                         if (node.restart) {
                             node.status({fill:"green", shape:"dot", text:(tags||" ")});
-                            twit.stream(thing, st, function(stream) {
-                                //console.log("ST",st);
-                                node.stream = stream;
-                                var retry = 60000; // 60 secs backoff for now
-                                stream.on('data', function(tweet) {
-                                    if (tweet.user !== undefined) {
-                                        var where = tweet.user.location;
-                                        var la = tweet.lang || tweet.user.lang;
-                                        var msg = { topic:node.topic+"/"+tweet.user.screen_name, payload:tweet.text, lang:la, tweet:tweet };
-                                        if (where) {
-                                            msg.location = {place:where};
-                                            addLocationToTweet(msg);
+                            clearTimeout(process.twitStream2);
+                            process.twitStream2 = setTimeout(()=>{
+                                twit.stream(thing, st, function(stream) {
+                                    //console.log("ST",st);
+                                    node.stream = stream;
+                                    var retry = 60000; // 60 secs backoff for now
+                                    stream.on('data', function(tweet) {
+                                        if (tweet.user !== undefined) {
+                                            var where = tweet.user.location;
+                                            var la = tweet.lang || tweet.user.lang;
+                                            var msg = { topic:node.topic+"/"+tweet.user.screen_name, payload:tweet.text, lang:la, tweet:tweet };
+                                            if (where) {
+                                                msg.location = {place:where};
+                                                addLocationToTweet(msg);
+                                            }
+                                            node.send(msg);
+                                            //node.status({fill:"green", shape:"dot", text:(tags||" ")});
                                         }
-                                        node.send(msg);
-                                        //node.status({fill:"green", shape:"dot", text:(tags||" ")});
-                                    }
+                                    });
+                                    stream.on('limit', function(tweet) {
+                                        //node.status({fill:"grey", shape:"dot", text:RED._("twitter.errors.limitrate")});
+                                        node.status({fill:"grey", shape:"dot", text:(tags||" ")});
+                                        node.tout2 = setTimeout(function() { node.status({fill:"green", shape:"dot", text:(tags||" ")}); },10000);
+                                    });
+                                    stream.on('error', function(tweet,rc) {
+                                        //console.log("ERRO",rc,tweet);
+                                        if (rc == 420) {
+                                            node.status({fill:"red", shape:"ring", text:RED._("twitter.errors.ratelimit")});
+                                        }
+                                        else {
+                                            node.status({fill:"red", shape:"ring", text:tweet.toString()});
+                                            node.warn(RED._("twitter.errors.streamerror",{error:tweet.toString(),rc:rc}));
+                                        }
+                                        twitterRateTimeout = Date.now() + retry;
+                                        if (node.restart) {
+                                            node.tout = setTimeout(function() { setupStream() },retry);
+                                        }
+                                    });
+                                    stream.on('destroy', function (response) {
+                                        //console.log("DEST",response)
+                                        twitterRateTimeout = Date.now() + 15000;
+                                        if (node.restart) {
+                                            node.status({fill:"red", shape:"dot", text:" "});
+                                            node.warn(RED._("twitter.errors.unexpectedend"));
+                                            node.tout = setTimeout(function() { setupStream() },15000);
+                                        }
+                                    });
                                 });
-                                stream.on('limit', function(tweet) {
-                                    //node.status({fill:"grey", shape:"dot", text:RED._("twitter.errors.limitrate")});
-                                    node.status({fill:"grey", shape:"dot", text:(tags||" ")});
-                                    node.tout2 = setTimeout(function() { node.status({fill:"green", shape:"dot", text:(tags||" ")}); },10000);
-                                });
-                                stream.on('error', function(tweet,rc) {
-                                    //console.log("ERRO",rc,tweet);
-                                    if (rc == 420) {
-                                        node.status({fill:"red", shape:"ring", text:RED._("twitter.errors.ratelimit")});
-                                    }
-                                    else {
-                                        node.status({fill:"red", shape:"ring", text:tweet.toString()});
-                                        node.warn(RED._("twitter.errors.streamerror",{error:tweet.toString(),rc:rc}));
-                                    }
-                                    twitterRateTimeout = Date.now() + retry;
-                                    if (node.restart) {
-                                        node.tout = setTimeout(function() { setupStream() },retry);
-                                    }
-                                });
-                                stream.on('destroy', function (response) {
-                                    //console.log("DEST",response)
-                                    twitterRateTimeout = Date.now() + 15000;
-                                    if (node.restart) {
-                                        node.status({fill:"red", shape:"dot", text:" "});
-                                        node.warn(RED._("twitter.errors.unexpectedend"));
-                                        node.tout = setTimeout(function() { setupStream() },15000);
-                                    }
-                                });
-                            });
+                            }, 5000);
                         }
                     }
 
